@@ -1,0 +1,167 @@
+diff --git a/hermes_cli/profiles.py b/hermes_cli/profiles.py
+index 1e9fcae0..57e3fb89 100644
+--- a/hermes_cli/profiles.py
++++ b/hermes_cli/profiles.py
+@@ -26,6 +26,7 @@ import shutil
+ import stat
+ import subprocess
+ import sys
++import yaml
+ from dataclasses import dataclass
+ from pathlib import Path, PurePosixPath, PureWindowsPath
+ from typing import List, Optional
+@@ -298,6 +299,61 @@ def _read_config_model(profile_dir: Path) -> tuple:
+         return None, None
+ 
+ 
++def _merge_default_mcp_servers(profile_dir: Path) -> None:
++    """Merge default-profile MCP servers into a named profile config.
++
++    Shared MCP integrations configured on the default profile should remain
++    available everywhere, including freshly created profiles. Existing
++    profile-specific MCP server definitions win and are never overwritten.
++    """
++    default_home = _get_default_hermes_home()
++    if profile_dir == default_home:
++        return
++
++    source_config_path = default_home / "config.yaml"
++    if not source_config_path.exists():
++        return
++
++    try:
++        with open(source_config_path, "r", encoding="utf-8") as f:
++            source_config = yaml.safe_load(f) or {}
++    except Exception:
++        return
++
++    source_servers = source_config.get("mcp_servers")
++    if not isinstance(source_servers, dict) or not source_servers:
++        return
++
++    target_config_path = profile_dir / "config.yaml"
++    if target_config_path.exists():
++        try:
++            with open(target_config_path, "r", encoding="utf-8") as f:
++                target_config = yaml.safe_load(f) or {}
++        except Exception:
++            return
++    else:
++        target_config = {}
++
++    target_servers = target_config.get("mcp_servers")
++    if target_servers is None:
++        target_servers = {}
++    if not isinstance(target_servers, dict):
++        return
++
++    changed = False
++    for server_name, server_cfg in source_servers.items():
++        if server_name not in target_servers:
++            target_servers[server_name] = server_cfg
++            changed = True
++
++    if not changed:
++        return
++
++    target_config["mcp_servers"] = target_servers
++    with open(target_config_path, "w", encoding="utf-8") as f:
++        yaml.safe_dump(target_config, f, sort_keys=False)
++
++
+ def _check_gateway_running(profile_dir: Path) -> bool:
+     """Check if a gateway is running for a given profile directory."""
+     pid_file = profile_dir / "gateway.pid"
+@@ -469,6 +525,8 @@ def create_profile(
+         except Exception:
+             pass  # best-effort — don't fail profile creation over this
+ 
++    _merge_default_mcp_servers(profile_dir)
++
+     return profile_dir
+ 
+ 
+diff --git a/tests/hermes_cli/test_profiles.py b/tests/hermes_cli/test_profiles.py
+index e6de2f67..36ac1e6e 100644
+--- a/tests/hermes_cli/test_profiles.py
++++ b/tests/hermes_cli/test_profiles.py
+@@ -13,6 +13,7 @@ from pathlib import Path
+ from unittest.mock import patch, MagicMock
+ 
+ import pytest
++import yaml
+ 
+ from hermes_cli.profiles import (
+     validate_profile_name,
+@@ -180,6 +181,71 @@ class TestCreateProfile:
+         # SOUL.md is always seeded with the default even when clone source lacks it
+         assert (profile_dir / "SOUL.md").exists()
+ 
++    def test_fresh_profile_inherits_default_mcp_servers(self, profile_env):
++        tmp_path = profile_env
++        default_home = tmp_path / ".hermes"
++        (default_home / "config.yaml").write_text(
++            yaml.safe_dump(
++                {
++                    "mcp_servers": {
++                        "deerflow": {
++                            "command": "/tmp/run_deerflow_mcp.sh",
++                            "args": [],
++                            "timeout": 300,
++                        }
++                    }
++                },
++                sort_keys=False,
++            )
++        )
++
++        profile_dir = create_profile("coder", no_alias=True)
++
++        config = yaml.safe_load((profile_dir / "config.yaml").read_text()) or {}
++        assert config["mcp_servers"]["deerflow"]["command"] == "/tmp/run_deerflow_mcp.sh"
++        assert config["mcp_servers"]["deerflow"]["timeout"] == 300
++
++    def test_fresh_profile_keeps_existing_profile_specific_mcp_server_values(self, profile_env):
++        tmp_path = profile_env
++        default_home = tmp_path / ".hermes"
++        (default_home / "config.yaml").write_text(
++            yaml.safe_dump(
++                {
++                    "mcp_servers": {
++                        "deerflow": {
++                            "command": "/tmp/default_wrapper.sh",
++                            "args": [],
++                            "timeout": 300,
++                        }
++                    }
++                },
++                sort_keys=False,
++            )
++        )
++
++        source_dir = create_profile("source", no_alias=True)
++        (source_dir / "config.yaml").write_text(
++            yaml.safe_dump(
++                {
++                    "mcp_servers": {
++                        "deerflow": {
++                            "command": "/tmp/source_specific_wrapper.sh",
++                            "args": ["--custom"],
++                            "timeout": 120,
++                        }
++                    }
++                },
++                sort_keys=False,
++            )
++        )
++
++        profile_dir = create_profile("coder", clone_from="source", clone_config=True, no_alias=True)
++
++        config = yaml.safe_load((profile_dir / "config.yaml").read_text()) or {}
++        assert config["mcp_servers"]["deerflow"]["command"] == "/tmp/source_specific_wrapper.sh"
++        assert config["mcp_servers"]["deerflow"]["args"] == ["--custom"]
++        assert config["mcp_servers"]["deerflow"]["timeout"] == 120
++
+ 
+ # ===================================================================
+ # TestDeleteProfile

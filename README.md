@@ -1,88 +1,207 @@
-# Hermes Custom Endpoint UA Fix
+# Hermes custom endpoint + DeerFlow MCP compatibility bundle
 
-Minimal patch for Hermes Agent `v0.8.0` to support OpenAI-compatible gateways that block the default OpenAI Python SDK `User-Agent`.
+This repo contains the Hermes-side changes and helper files I use locally for two separate but related workflows:
 
-## Problem
+1. a custom-endpoint `User-Agent` fix for OpenAI-compatible gateways that reject the default OpenAI Python SDK header
+2. a DeerFlow MCP bridge bundle so Hermes can talk to DeerFlow reliably, plus an optional Hermes profile patch that keeps the DeerFlow MCP server available in newly created profiles
 
-Some custom gateways accept Hermes request bodies and both:
+Everything here was prepared from a local Hermes Agent `v0.8.0` checkout around commit `15b1a3aa69da339124f6fbbfd08c2cc27c00bc2e`.
 
-- `POST /v1/chat/completions`
-- `POST /v1/responses`
+## Repository layout
 
-but still reject requests sent through the OpenAI Python SDK with:
+- `patches/hermes-v0.8.0-custom-ua.patch`
+  - makes Hermes send `User-Agent: HermesAgent/1.0` for generic custom OpenAI-compatible endpoints
+- `patches/hermes-v0.8.0-deerflow-profile-mcp.patch`
+  - patches Hermes profile creation so `mcp_servers` from the default profile are merged into new profiles
+- `deerflow-mcp/deerflow_mcp.py`
+  - FastMCP wrapper around `deerflow.client.DeerFlowClient`
+- `deerflow-mcp/run_deerflow_mcp.sh`
+  - launcher that runs the wrapper inside the DeerFlow backend via `uv`
+- `deerflow-mcp/tests/test_deerflow_mcp_wrapper.py`
+  - lightweight wrapper tests adapted to this repo layout
+- `install_deerflow_mcp.sh`
+  - copies the DeerFlow MCP wrapper/launcher into `~/.hermes/scripts/`
+- `apply.sh`
+  - applies one of the Hermes patches to a Hermes checkout
 
-```text
-403 Your request was blocked.
-```
+## DeerFlow MCP tools currently exposed
 
-In the tested environment, the gateway accepted the same request via `curl` but rejected it when the request included:
+The bundled wrapper currently exposes these 19 tools:
 
-```text
-User-Agent: OpenAI/Python 2.31.0
-```
+- `deerflow_chat`
+- `deerflow_chat_mode`
+- `deerflow_chat_agent`
+- `deerflow_stream`
+- `deerflow_list_threads`
+- `deerflow_get_thread`
+- `deerflow_thread_history`
+- `deerflow_list_models`
+- `deerflow_list_skills`
+- `deerflow_get_skill`
+- `deerflow_list_agents`
+- `deerflow_get_agent`
+- `deerflow_create_agent`
+- `deerflow_update_agent`
+- `deerflow_delete_agent`
+- `deerflow_get_memory`
+- `deerflow_update_skill`
+- `deerflow_install_skill`
+- `deerflow_upload_files`
 
-## What This Patch Changes
+## Quick start on another machine
 
-It makes Hermes send a neutral header for `provider == custom`:
-
-```text
-User-Agent: HermesAgent/1.0
-```
-
-It preserves existing special-case headers for:
-
-- OpenRouter
-- GitHub Copilot
-- Kimi
-- Qwen Portal
-
-## Files Changed
-
-- `run_agent.py`
-- `agent/auxiliary_client.py`
-
-## Tested Against
-
-- Hermes Agent commit: `15b1a3aa69da339124f6fbbfd08c2cc27c00bc2e`
-- Hermes version observed locally: `v0.8.0`
-
-## Apply On Another Device
-
-Clone this repo:
+### 1. Clone this repo
 
 ```bash
 git clone https://github.com/CatIIIIIIII/hermes-custom-endpoint-ua-fix.git
 cd hermes-custom-endpoint-ua-fix
 ```
 
-Apply the patch to your Hermes checkout:
+### 2. Install the DeerFlow MCP wrapper into Hermes
 
 ```bash
-./apply.sh ~/.hermes/hermes-agent
+./install_deerflow_mcp.sh
 ```
 
-If your Hermes repo lives somewhere else:
+That copies:
+
+- `deerflow-mcp/deerflow_mcp.py` -> `~/.hermes/scripts/deerflow_mcp.py`
+- `deerflow-mcp/run_deerflow_mcp.sh` -> `~/.hermes/scripts/run_deerflow_mcp.sh`
+
+If you want a different Hermes home:
 
 ```bash
-./apply.sh /path/to/hermes-agent
+./install_deerflow_mcp.sh /path/to/hermes-home
 ```
 
-## Manual Apply
+### 3. Optionally patch Hermes so new profiles inherit default MCP servers
 
-If you prefer:
+This is the Hermes-side compatibility change that keeps the DeerFlow MCP entry available when you create fresh profiles.
+
+```bash
+./apply.sh ~/.hermes/hermes-agent deerflow-profile
+```
+
+If you also want the custom endpoint UA fix:
+
+```bash
+./apply.sh ~/.hermes/hermes-agent ua
+```
+
+Or apply both patches:
+
+```bash
+./apply.sh ~/.hermes/hermes-agent all
+```
+
+### 4. Add the DeerFlow MCP server to your Hermes config
+
+Add something like this to the active profile's `config.yaml`:
+
+```yaml
+mcp_servers:
+  deerflow:
+    command: /Users/yourname/.hermes/scripts/run_deerflow_mcp.sh
+    args: []
+    timeout: 300
+    connect_timeout: 60
+    env:
+      DEERFLOW_BACKEND_DIR: /Users/yourname/Documents/deer-flow/backend
+      DEER_FLOW_CONFIG_PATH: /Users/yourname/Documents/deer-flow/backend/config.yaml
+      DEER_FLOW_EXTENSIONS_CONFIG_PATH: /Users/yourname/Documents/deer-flow/backend/extensions_config.json
+```
+
+Notes:
+
+- Hermes MCP config uses `mcp_servers`
+- DeerFlow extensions config uses `mcpServers`
+- Hermes passes a filtered environment to MCP subprocesses, so put DeerFlow-specific paths under `mcp_servers.deerflow.env` if you need them
+- if your DeerFlow backend is already at one of these default locations, `DEERFLOW_BACKEND_DIR` can be omitted:
+  - `~/Documents/deer-flow/backend`
+  - `~/deer-flow/backend`
+
+### 5. Verify
+
+```bash
+hermes mcp test deerflow
+hermes mcp list
+```
+
+If you are using profiles, remember that `hermes mcp list` reads the active profile's config.
+
+## What the DeerFlow profile patch changes
+
+The `deerflow-profile` patch updates Hermes profile creation so that:
+
+- MCP servers configured on the default profile are copied into newly created named profiles
+- existing profile-specific MCP server definitions are preserved and not overwritten
+- DeerFlow MCP stays available without re-adding the same `mcp_servers.deerflow` block every time you create a new profile
+
+Files touched by that Hermes patch:
+
+- `hermes_cli/profiles.py`
+- `tests/hermes_cli/test_profiles.py`
+
+## What the custom endpoint UA patch changes
+
+The `ua` patch makes Hermes send a neutral header for generic custom OpenAI-compatible endpoints:
+
+```text
+User-Agent: HermesAgent/1.0
+```
+
+It keeps the existing provider-specific special cases for:
+
+- OpenRouter
+- GitHub Copilot
+- Kimi
+- Qwen Portal
+
+Files touched by that Hermes patch:
+
+- `run_agent.py`
+- `agent/auxiliary_client.py`
+
+## Manual patch application
+
+### DeerFlow profile patch
+
+```bash
+git -C ~/.hermes/hermes-agent apply patches/hermes-v0.8.0-deerflow-profile-mcp.patch
+```
+
+### Custom endpoint UA patch
 
 ```bash
 git -C ~/.hermes/hermes-agent apply patches/hermes-v0.8.0-custom-ua.patch
 ```
 
-## Verify
+## Test / sanity-check commands
 
-After applying:
+### Verify the DeerFlow wrapper files are at least syntactically valid
 
 ```bash
-~/.hermes/hermes-agent/venv/bin/python -m py_compile \
-  ~/.hermes/hermes-agent/run_agent.py \
-  ~/.hermes/hermes-agent/agent/auxiliary_client.py
+python3 -m py_compile deerflow-mcp/deerflow_mcp.py
+bash -n deerflow-mcp/run_deerflow_mcp.sh
 ```
 
-Then restart Hermes and test your custom provider again.
+### Run wrapper tests from this repo
+
+Use the Hermes virtualenv if your shell does not already have `pytest` and the `mcp` package:
+
+```bash
+~/.hermes/hermes-agent/venv/bin/python -m pytest deerflow-mcp/tests/test_deerflow_mcp_wrapper.py
+```
+
+### Verify the Hermes profile patch applies cleanly
+
+```bash
+git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profile-mcp.patch
+```
+
+## Practical notes
+
+- The DeerFlow wrapper is intentionally high-level; it exposes DeerFlow as a research/agent engine instead of mirroring every low-level DeerFlow internal tool.
+- The wrapper uses lazy client creation to avoid import-time failures during inspection.
+- Thread listing/history is derived from DeerFlow's checkpointer so it still works when some `DeerFlowClient` thread helpers are missing.
+- The wrapper also includes custom-agent CRUD tools by writing DeerFlow agent configs directly when needed.
