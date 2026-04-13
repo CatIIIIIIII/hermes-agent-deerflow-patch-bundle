@@ -1,0 +1,118 @@
+diff --git a/agent/auxiliary_client.py b/agent/auxiliary_client.py
+index 6f2f64e9..9c70b428 100644
+--- a/agent/auxiliary_client.py
++++ b/agent/auxiliary_client.py
+@@ -122,6 +122,24 @@ _OR_HEADERS = {
+     "X-OpenRouter-Categories": "productivity,cli-agent",
+ }
+ 
++
++def _custom_endpoint_headers(base_url: str) -> Dict[str, str]:
++    """Return safe default headers for custom OpenAI-compatible endpoints.
++
++    Some gateways claim OpenAI compatibility but block the OpenAI SDK's
++    default ``User-Agent: OpenAI/Python ...`` header. Give custom endpoints
++    a neutral Hermes-specific UA unless they already need provider-specific
++    headers (for example Kimi or GitHub Copilot).
++    """
++    normalized = str(base_url or "").strip().lower()
++    if "api.kimi.com" in normalized:
++        return {"User-Agent": "KimiCLI/1.30.0"}
++    if "api.githubcopilot.com" in normalized:
++        from hermes_cli.models import copilot_default_headers
++
++        return copilot_default_headers()
++    return {"User-Agent": "HermesAgent/1.0"}
++
+ # Nous Portal extra_body for product attribution.
+ # Callers should pass this as extra_body in chat.completions.create()
+ # when the auxiliary client is backed by Nous Portal.
+@@ -935,11 +953,13 @@ def _try_custom_endpoint() -> Tuple[Optional[OpenAI], Optional[str]]:
+     if custom_base.lower().startswith(_CODEX_AUX_BASE_URL.lower()):
+         return None, None
+     model = _read_main_model() or "gpt-4o-mini"
++    headers = _custom_endpoint_headers(custom_base)
++    client_kwargs = {"default_headers": headers} if headers else {}
+     logger.debug("Auxiliary client: custom endpoint (%s, api_mode=%s)", model, custom_mode or "chat_completions")
+     if custom_mode == "codex_responses":
+-        real_client = OpenAI(api_key=custom_key, base_url=custom_base)
++        real_client = OpenAI(api_key=custom_key, base_url=custom_base, **client_kwargs)
+         return CodexAuxiliaryClient(real_client, model), model
+-    return OpenAI(api_key=custom_key, base_url=custom_base), model
++    return OpenAI(api_key=custom_key, base_url=custom_base, **client_kwargs), model
+ 
+ 
+ def _try_codex() -> Tuple[Optional[Any], Optional[str]]:
+@@ -1262,6 +1282,10 @@ def _to_async_client(sync_client, model: str):
+         async_kwargs["default_headers"] = copilot_default_headers()
+     elif "api.kimi.com" in base_lower:
+         async_kwargs["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
++    else:
++        default_headers = getattr(sync_client, "_default_headers", None)
++        if default_headers:
++            async_kwargs["default_headers"] = dict(default_headers)
+     return AsyncOpenAI(**async_kwargs), model
+ 
+ 
+@@ -1437,11 +1461,9 @@ def resolve_provider_client(
+                 provider,
+             )
+             extra = {}
+-            if "api.kimi.com" in custom_base.lower():
+-                extra["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
+-            elif "api.githubcopilot.com" in custom_base.lower():
+-                from hermes_cli.models import copilot_default_headers
+-                extra["default_headers"] = copilot_default_headers()
++            headers = _custom_endpoint_headers(custom_base)
++            if headers:
++                extra["default_headers"] = headers
+             client = OpenAI(api_key=custom_key, base_url=custom_base, **extra)
+             client = _wrap_if_needed(client, final_model, custom_base)
+             return (_to_async_client(client, final_model) if async_mode
+@@ -1472,7 +1494,12 @@ def resolve_provider_client(
+                     model or _read_main_model() or "gpt-4o-mini",
+                     provider,
+                 )
+-                client = OpenAI(api_key=custom_key, base_url=custom_base)
++                headers = _custom_endpoint_headers(custom_base)
++                client = OpenAI(
++                    api_key=custom_key,
++                    base_url=custom_base,
++                    **({"default_headers": headers} if headers else {}),
++                )
+                 client = _wrap_if_needed(client, final_model, custom_base)
+                 logger.debug(
+                     "resolve_provider_client: named custom provider %r (%s)",
+diff --git a/run_agent.py b/run_agent.py
+index 36452bc6..8dbaf677 100644
+--- a/run_agent.py
++++ b/run_agent.py
+@@ -875,6 +875,10 @@ class AIAgent:
+                     }
+                 elif "portal.qwen.ai" in effective_base.lower():
+                     client_kwargs["default_headers"] = _qwen_portal_headers()
++                elif self.provider == "custom":
++                    from agent.auxiliary_client import _custom_endpoint_headers
++
++                    client_kwargs["default_headers"] = _custom_endpoint_headers(effective_base)
+             else:
+                 # No explicit creds — use the centralized provider router
+                 from agent.auxiliary_client import resolve_provider_client
+@@ -4564,7 +4568,7 @@ class AIAgent:
+         return True
+ 
+     def _apply_client_headers_for_base_url(self, base_url: str) -> None:
+-        from agent.auxiliary_client import _OR_HEADERS
++        from agent.auxiliary_client import _OR_HEADERS, _custom_endpoint_headers
+ 
+         normalized = (base_url or "").lower()
+         if "openrouter" in normalized:
+@@ -4577,6 +4581,8 @@ class AIAgent:
+             self._client_kwargs["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
+         elif "portal.qwen.ai" in normalized:
+             self._client_kwargs["default_headers"] = _qwen_portal_headers()
++        elif self.provider == "custom":
++            self._client_kwargs["default_headers"] = _custom_endpoint_headers(base_url)
+         else:
+             self._client_kwargs.pop("default_headers", None)
+ 
