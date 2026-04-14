@@ -5,7 +5,9 @@ This repo contains the Hermes-side changes and helper files I use locally for tw
 1. a custom-endpoint `User-Agent` fix for OpenAI-compatible gateways that reject the default OpenAI Python SDK header
 2. a DeerFlow MCP bridge bundle so Hermes can talk to DeerFlow reliably, plus an optional Hermes profile patch that keeps the DeerFlow MCP server available in newly created profiles
 
-Everything here was prepared from a local Hermes Agent `v0.8.0` checkout around commit `15b1a3aa69da339124f6fbbfd08c2cc27c00bc2e`.
+Everything here is currently exported from a local Hermes Agent `main` checkout at commit `1acf81fd84f3677db95ff9d6bafe5fdf1d6bf838`.
+
+The patch filenames still keep the original `v0.8.0` label so existing local scripts do not need to change.
 
 ## Repository layout
 
@@ -48,6 +50,40 @@ The bundled wrapper currently exposes these 19 tools:
 - `deerflow_install_skill`
 - `deerflow_upload_files`
 
+## Apply the patches
+
+These patches are meant to be applied on top of a recent Hermes `main` checkout.
+
+Recommended flow:
+
+```bash
+git clone git@github.com:NousResearch/hermes-agent.git ~/.hermes/hermes-agent
+cd ~/.hermes/hermes-agent
+git status --short
+```
+
+Make sure the checkout is clean before applying patches.
+
+Then from this bundle repo:
+
+```bash
+./apply.sh ~/.hermes/hermes-agent all
+```
+
+Or apply each patch separately:
+
+```bash
+./apply.sh ~/.hermes/hermes-agent ua
+./apply.sh ~/.hermes/hermes-agent deerflow-profile
+```
+
+If you only want to verify applicability first:
+
+```bash
+git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-custom-ua.patch
+git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profile-mcp.patch
+```
+
 ## Quick start on another machine
 
 ### 1. Clone this repo
@@ -74,21 +110,7 @@ If you want a different Hermes home:
 ./install_deerflow_mcp.sh /path/to/hermes-home
 ```
 
-### 3. Optionally patch Hermes so new profiles inherit default MCP servers
-
-This is the Hermes-side compatibility change that keeps the DeerFlow MCP entry available when you create fresh profiles.
-
-```bash
-./apply.sh ~/.hermes/hermes-agent deerflow-profile
-```
-
-If you also want the custom endpoint UA fix:
-
-```bash
-./apply.sh ~/.hermes/hermes-agent ua
-```
-
-Or apply both patches:
+### 3. Patch Hermes
 
 ```bash
 ./apply.sh ~/.hermes/hermes-agent all
