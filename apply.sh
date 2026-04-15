@@ -14,12 +14,14 @@ Examples:
   ./apply.sh
   ./apply.sh ~/.hermes/hermes-agent ua
   ./apply.sh ~/.hermes/hermes-agent deerflow-profile
+  ./apply.sh ~/.hermes/hermes-agent memory-retentive
   ./apply.sh ~/.hermes/hermes-agent all
 
 Available patches:
   ua                Hermes custom endpoint User-Agent fix
   deerflow-profile  Merge default-profile mcp_servers into new Hermes profiles
-  all               Apply both patches in order
+  memory-retentive  Raise Hermes memory defaults and make memory review more aggressive
+  all               Apply all patches in order
 EOF
 }
 
@@ -30,6 +32,9 @@ patch_path_for() {
       ;;
     deerflow-profile)
       printf '%s\n' "$SCRIPT_DIR/patches/hermes-v0.8.0-deerflow-profile-mcp.patch"
+      ;;
+    memory-retentive)
+      printf '%s\n' "$SCRIPT_DIR/patches/hermes-v0.8.0-memory-retentive-config.patch"
       ;;
     *)
       return 1
@@ -68,15 +73,16 @@ if [[ ! -d "$TARGET/.git" ]]; then
 fi
 
 case "$PATCH_NAME" in
-  ua|deerflow-profile)
+  ua|deerflow-profile|memory-retentive)
     apply_one "$PATCH_NAME"
     ;;
   all)
     apply_one ua
     apply_one deerflow-profile
+    apply_one memory-retentive
     ;;
   list)
-    printf '%s\n' 'ua' 'deerflow-profile' 'all'
+    printf '%s\n' 'ua' 'deerflow-profile' 'memory-retentive' 'all'
     ;;
   *)
     echo "Unknown patch: $PATCH_NAME" >&2

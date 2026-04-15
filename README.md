@@ -15,6 +15,8 @@ The patch filenames still keep the original `v0.8.0` label so existing local scr
   - makes Hermes send `User-Agent: HermesAgent/1.0` for generic custom OpenAI-compatible endpoints
 - `patches/hermes-v0.8.0-deerflow-profile-mcp.patch`
   - patches Hermes profile creation so `mcp_servers` from the default profile are merged into new profiles
+- `patches/hermes-v0.8.0-memory-retentive-config.patch`
+  - raises Hermes built-in memory defaults and makes memory review / flush behavior more aggressive
 - `deerflow-mcp/deerflow_mcp.py`
   - FastMCP wrapper around `deerflow.client.DeerFlowClient`
 - `deerflow-mcp/run_deerflow_mcp.sh`
@@ -102,6 +104,7 @@ Or apply each patch separately:
 ```bash
 ./apply.sh ~/.hermes/hermes-agent ua
 ./apply.sh ~/.hermes/hermes-agent deerflow-profile
+./apply.sh ~/.hermes/hermes-agent memory-retentive
 ```
 
 If you only want to verify applicability first:
@@ -141,6 +144,12 @@ If you want a different Hermes home:
 
 ```bash
 ./apply.sh ~/.hermes/hermes-agent all
+```
+
+Or if you only want the memory-defaults patch:
+
+```bash
+./apply.sh ~/.hermes/hermes-agent memory-retentive
 ```
 
 ### 4. Add the DeerFlow MCP server to your Hermes config

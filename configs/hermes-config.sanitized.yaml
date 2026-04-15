@@ -105,7 +105,7 @@ auxiliary:
     model: ""
     base_url: ""
     api_key: ""
-    timeout: 30
+    timeout: 45
 display:
   compact: false
   personality: kawaii
@@ -168,8 +168,10 @@ context:
 memory:
   memory_enabled: true
   user_profile_enabled: true
-  memory_char_limit: 2200
-  user_char_limit: 1375
+  memory_char_limit: 20000
+  user_char_limit: 10000
+  nudge_interval: 4
+  flush_min_turns: 2
   provider: ""
 delegation:
   model: ""
