@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import os
 import shutil
 import uuid
@@ -34,28 +35,282 @@ _MODE_FLAGS = {
         "subagent_enabled": True,
     },
 }
+_REASONING_EFFORTS = {"low", "medium", "high"}
 
 
 def _get_config_path() -> str | None:
     return os.getenv("DEER_FLOW_CONFIG_PATH") or None
 
 
+def _normalize_skills(skills: list[str] | None) -> list[str] | None:
+    if skills is None:
+        return None
 
-def _make_client(agent_name: str | None = None):
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for skill in skills:
+        name = str(skill).strip()
+        if not name or name in seen:
+            continue
+        normalized.append(name)
+        seen.add(name)
+    return normalized
+
+
+
+def _make_client(agent_name: str | None = None, skills: list[str] | None = None):
     from deerflow.client import DeerFlowClient
 
     config_path = _get_config_path()
     kwargs: dict[str, Any] = {}
     if config_path:
         kwargs["config_path"] = config_path
+    normalized_skills = _normalize_skills(skills)
+    if normalized_skills is not None:
+        kwargs["available_skills"] = set(normalized_skills)
     if agent_name is not None:
         kwargs["agent_name"] = agent_name
+    if agent_name is not None or normalized_skills is not None:
         return DeerFlowClient(**kwargs)
 
     global _CLIENT
     if _CLIENT is None:
         _CLIENT = DeerFlowClient(**kwargs)
     return _CLIENT
+
+
+def _normalize_reasoning_effort(reasoning_effort: str | None) -> str | None:
+    if reasoning_effort is None:
+        return None
+
+    normalized = reasoning_effort.strip().lower()
+    if not normalized:
+        return None
+    if normalized not in _REASONING_EFFORTS:
+        raise ValueError(
+            f"Unknown reasoning_effort: {reasoning_effort}. Use one of: {', '.join(sorted(_REASONING_EFFORTS))}"
+        )
+    return normalized
+
+
+def _resolve_agent_name(agent_name: str | None, use_agent: bool) -> str | None:
+    normalized = (agent_name or "").strip()
+    if normalized:
+        return normalized
+    if use_agent:
+        raise ValueError("use_agent=True requires a non-empty agent_name")
+    return None
+
+
+def _normalize_runtime_flags(
+    *,
+    thinking_enabled: bool,
+    plan_mode: bool,
+    subagent_enabled: bool,
+) -> dict[str, bool]:
+    if subagent_enabled:
+        return {
+            "thinking_enabled": True,
+            "plan_mode": True,
+            "subagent_enabled": True,
+        }
+    return {
+        "thinking_enabled": bool(thinking_enabled),
+        "plan_mode": bool(plan_mode),
+        "subagent_enabled": False,
+    }
+
+
+@contextmanager
+def _inject_reasoning_effort(client, reasoning_effort: str | None):
+    if reasoning_effort is None or not hasattr(client, "_get_runnable_config"):
+        yield
+        return
+
+    original = client._get_runnable_config
+
+    def _patched_get_runnable_config(thread_id: str, *args, **overrides):
+        config = original(thread_id, *args, **overrides)
+        configurable = config.setdefault("configurable", {})
+        configurable["reasoning_effort"] = reasoning_effort
+        return config
+
+    client._get_runnable_config = _patched_get_runnable_config
+    try:
+        yield
+    finally:
+        client._get_runnable_config = original
+
+
+def _chat_with_runtime_overrides(
+    client,
+    message: str,
+    *,
+    reasoning_effort: str | None = None,
+    **kwargs,
+) -> str:
+    with _inject_reasoning_effort(client, reasoning_effort):
+        return client.chat(
+            message,
+            reasoning_effort=reasoning_effort,
+            **kwargs,
+        )
+
+
+def _stream_with_runtime_overrides(
+    client,
+    message: str,
+    *,
+    reasoning_effort: str | None = None,
+    **kwargs,
+):
+    with _inject_reasoning_effort(client, reasoning_effort):
+        yield from client.stream(
+            message,
+            reasoning_effort=reasoning_effort,
+            **kwargs,
+        )
+
+
+def _resolve_config_file() -> Path | None:
+    config_path = _get_config_path()
+    if config_path:
+        path = Path(config_path).expanduser()
+        return path if path.exists() else None
+
+    backend_dir = Path.cwd()
+    for candidate in (backend_dir / "config.yaml", backend_dir.parent / "config.yaml"):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _load_sandbox_mounts() -> list[tuple[Path, str]]:
+    config_file = _resolve_config_file()
+    if config_file is None:
+        return []
+
+    try:
+        data = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+
+    raw_mounts = ((data.get("sandbox") or {}).get("mounts") or [])
+    mounts: list[tuple[Path, str]] = []
+    for mount in raw_mounts:
+        if not isinstance(mount, dict):
+            continue
+        host_path = str(mount.get("host_path") or "").strip()
+        container_path = str(mount.get("container_path") or "").strip()
+        if not host_path or not container_path or not container_path.startswith("/"):
+            continue
+        mounts.append((Path(host_path).expanduser().resolve(), container_path.rstrip("/") or "/"))
+
+    mounts.sort(key=lambda item: len(str(item[0])), reverse=True)
+    return mounts
+
+
+def _translate_host_path(host_path: Path, mappings: list[tuple[Path, str]]) -> str | None:
+    for root_path, visible_root in mappings:
+        try:
+            relative = host_path.relative_to(root_path)
+        except ValueError:
+            continue
+
+        relative_str = relative.as_posix()
+        if relative_str in ("", "."):
+            return visible_root
+        return f"{visible_root}/{relative_str}"
+    return None
+
+
+def _resolve_visible_cwd(cwd: str | None, thread_id: str | None) -> dict[str, str | bool] | None:
+    if cwd is None:
+        return None
+
+    raw_cwd = str(cwd).strip()
+    if not raw_cwd:
+        return None
+
+    input_path = Path(raw_cwd).expanduser()
+    if not input_path.is_absolute():
+        return {
+            "host_cwd": raw_cwd,
+            "visible_cwd": "",
+            "accessible": False,
+            "reason": "Relative cwd is ambiguous here. Pass an absolute host path.",
+        }
+
+    host_path = input_path.resolve()
+    if thread_id:
+        from deerflow.config.paths import get_paths
+
+        paths = get_paths()
+        thread_mappings = [
+            (paths.sandbox_work_dir(thread_id).resolve(), "/mnt/user-data/workspace"),
+            (paths.sandbox_uploads_dir(thread_id).resolve(), "/mnt/user-data/uploads"),
+            (paths.sandbox_outputs_dir(thread_id).resolve(), "/mnt/user-data/outputs"),
+        ]
+        visible = _translate_host_path(host_path, thread_mappings)
+        if visible is not None:
+            return {
+                "host_cwd": str(host_path),
+                "visible_cwd": visible,
+                "accessible": True,
+                "reason": "Mapped through DeerFlow thread workspace paths.",
+            }
+
+    visible = _translate_host_path(host_path, _load_sandbox_mounts())
+    if visible is not None:
+        return {
+            "host_cwd": str(host_path),
+            "visible_cwd": visible,
+            "accessible": True,
+            "reason": "Mapped through configured DeerFlow sandbox mounts.",
+        }
+
+    reason = "This host path is not in the current DeerFlow thread workspace or any configured sandbox mount."
+    if not host_path.exists():
+        reason = f"{reason} The host path also does not exist."
+    return {
+        "host_cwd": str(host_path),
+        "visible_cwd": "",
+        "accessible": False,
+        "reason": reason,
+    }
+
+
+def _apply_hermes_context(
+    message: str,
+    *,
+    cwd: str | None,
+    thread_id: str | None,
+    skills: list[str] | None,
+) -> str:
+    visible_cwd = _resolve_visible_cwd(cwd, thread_id)
+    normalized_skills = _normalize_skills(skills)
+
+    lines: list[str] = []
+    if visible_cwd is not None:
+        lines.append("[Hermes context]")
+        lines.append(f"Host cwd: {visible_cwd['host_cwd']}")
+        if visible_cwd["accessible"]:
+            lines.append(f"DeerFlow-visible cwd: {visible_cwd['visible_cwd']}")
+            lines.append("Use the DeerFlow-visible path above for file access. Do not use the host path directly.")
+        else:
+            lines.append("DeerFlow-visible cwd: unavailable")
+            lines.append(str(visible_cwd["reason"]))
+            lines.append("Do not assume this host path is accessible. Use uploads or add a sandbox mount first.")
+
+    if normalized_skills is not None:
+        if not lines:
+            lines.append("[Hermes context]")
+        lines.append("Requested skills: " + (", ".join(normalized_skills) if normalized_skills else "(none)"))
+
+    if not lines:
+        return message
+
+    return "\n".join(lines) + "\n\n" + message
 
 
 
@@ -82,25 +337,39 @@ def _run_chat(
     message: str,
     *,
     thread_id: str | None = None,
+    cwd: str | None = None,
+    skills: list[str] | None = None,
     model_name: str | None = None,
+    reasoning_effort: str | None = None,
     thinking_enabled: bool = True,
     plan_mode: bool = False,
     subagent_enabled: bool = False,
     agent_name: str | None = None,
+    use_agent: bool = False,
 ) -> dict[str, Any]:
-    client = _make_client(agent_name=agent_name)
-    thread_id = thread_id or str(uuid.uuid4())
-    answer = client.chat(
-        message,
-        thread_id=thread_id,
-        model_name=model_name,
+    resolved_agent_name = _resolve_agent_name(agent_name, use_agent)
+    runtime_flags = _normalize_runtime_flags(
         thinking_enabled=thinking_enabled,
         plan_mode=plan_mode,
         subagent_enabled=subagent_enabled,
     )
+    normalized_effort = _normalize_reasoning_effort(reasoning_effort)
+    client = _make_client(agent_name=resolved_agent_name, skills=skills)
+    thread_id = thread_id or str(uuid.uuid4())
+    message = _apply_hermes_context(message, cwd=cwd, thread_id=thread_id, skills=skills)
+    answer = _chat_with_runtime_overrides(
+        client,
+        message,
+        thread_id=thread_id,
+        model_name=model_name,
+        thinking_enabled=runtime_flags["thinking_enabled"],
+        plan_mode=runtime_flags["plan_mode"],
+        subagent_enabled=runtime_flags["subagent_enabled"],
+        reasoning_effort=normalized_effort,
+    )
     result = {"thread_id": thread_id, "answer": answer}
-    if agent_name is not None:
-        result["agent_name"] = agent_name
+    if resolved_agent_name is not None:
+        result["agent_name"] = resolved_agent_name
     return result
 
 
@@ -365,18 +634,36 @@ def _delete_agent_data(name: str) -> dict[str, Any]:
 def deerflow_chat(
     message: str,
     thread_id: str | None = None,
+    cwd: str | None = None,
+    skills: list[str] | None = None,
     model_name: str | None = None,
+    reasoning_effort: str | None = None,
     thinking_enabled: bool = True,
     plan_mode: bool = False,
     subagent_enabled: bool = False,
+    use_agent: bool = False,
+    agent_name: str | None = None,
 ) -> dict[str, Any]:
+    """Run DeerFlow with explicit effort and optional named-agent routing.
+
+    Use ``reasoning_effort`` to control model effort (``low``/``medium``/``high``)
+    when the selected DeerFlow model supports it. Set ``use_agent=true`` with
+    ``agent_name`` to route the run through a named DeerFlow agent. If
+    ``subagent_enabled`` is true, this wrapper forces ultra semantics by also
+    enabling thinking and plan mode.
+    """
     return _run_chat(
         message,
         thread_id=thread_id,
+        cwd=cwd,
+        skills=skills,
         model_name=model_name,
+        reasoning_effort=reasoning_effort,
         thinking_enabled=thinking_enabled,
         plan_mode=plan_mode,
         subagent_enabled=subagent_enabled,
+        use_agent=use_agent,
+        agent_name=agent_name,
     )
 
 
@@ -385,13 +672,31 @@ def deerflow_chat_mode(
     message: str,
     mode: str,
     thread_id: str | None = None,
+    cwd: str | None = None,
+    skills: list[str] | None = None,
     model_name: str | None = None,
+    reasoning_effort: str | None = None,
+    use_agent: bool = False,
+    agent_name: str | None = None,
 ) -> dict[str, Any]:
+    """Run DeerFlow with a preset mode.
+
+    Modes map to:
+    - ``flash``: no thinking, no plan mode, no subagents
+    - ``standard``: thinking only
+    - ``pro``: thinking + plan mode
+    - ``ultra``: thinking + plan mode + subagents
+    """
     flags = _resolve_mode_flags(mode)
     result = _run_chat(
         message,
         thread_id=thread_id,
+        cwd=cwd,
+        skills=skills,
         model_name=model_name,
+        reasoning_effort=reasoning_effort,
+        use_agent=use_agent,
+        agent_name=agent_name,
         **flags,
     )
     result["mode"] = mode.strip().lower()
@@ -403,15 +708,22 @@ def deerflow_chat_agent(
     message: str,
     agent_name: str,
     thread_id: str | None = None,
+    cwd: str | None = None,
+    skills: list[str] | None = None,
     model_name: str | None = None,
+    reasoning_effort: str | None = None,
     thinking_enabled: bool = True,
     plan_mode: bool = False,
     subagent_enabled: bool = False,
 ) -> dict[str, Any]:
+    """Run DeerFlow through a specific named DeerFlow agent."""
     return _run_chat(
         message,
         thread_id=thread_id,
+        cwd=cwd,
+        skills=skills,
         model_name=model_name,
+        reasoning_effort=reasoning_effort,
         thinking_enabled=thinking_enabled,
         plan_mode=plan_mode,
         subagent_enabled=subagent_enabled,
@@ -423,25 +735,41 @@ def deerflow_chat_agent(
 def deerflow_stream(
     message: str,
     thread_id: str | None = None,
+    cwd: str | None = None,
+    skills: list[str] | None = None,
     model_name: str | None = None,
+    reasoning_effort: str | None = None,
     thinking_enabled: bool = True,
     plan_mode: bool = False,
     subagent_enabled: bool = False,
+    use_agent: bool = False,
+    agent_name: str | None = None,
     max_events: int = 200,
 ) -> dict[str, Any]:
-    client = _make_client()
+    """Stream DeerFlow events with the same runtime controls as ``deerflow_chat``."""
+    resolved_agent_name = _resolve_agent_name(agent_name, use_agent)
+    runtime_flags = _normalize_runtime_flags(
+        thinking_enabled=thinking_enabled,
+        plan_mode=plan_mode,
+        subagent_enabled=subagent_enabled,
+    )
+    normalized_effort = _normalize_reasoning_effort(reasoning_effort)
+    client = _make_client(agent_name=resolved_agent_name, skills=skills)
     thread_id = thread_id or str(uuid.uuid4())
+    message = _apply_hermes_context(message, cwd=cwd, thread_id=thread_id, skills=skills)
     events = []
     truncated = False
 
     for idx, event in enumerate(
-        client.stream(
+        _stream_with_runtime_overrides(
+            client,
             message,
             thread_id=thread_id,
             model_name=model_name,
-            thinking_enabled=thinking_enabled,
-            plan_mode=plan_mode,
-            subagent_enabled=subagent_enabled,
+            thinking_enabled=runtime_flags["thinking_enabled"],
+            plan_mode=runtime_flags["plan_mode"],
+            subagent_enabled=runtime_flags["subagent_enabled"],
+            reasoning_effort=normalized_effort,
         )
     ):
         if idx >= max_events:

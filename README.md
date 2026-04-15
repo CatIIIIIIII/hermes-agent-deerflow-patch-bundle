@@ -50,6 +50,33 @@ The bundled wrapper currently exposes these 19 tools:
 - `deerflow_install_skill`
 - `deerflow_upload_files`
 
+## DeerFlow MCP runtime controls
+
+The chat/stream tools in this bundle now support explicit runtime controls so Hermes can choose how much DeerFlow should think and whether the run should use a named DeerFlow agent.
+
+Supported controls:
+
+- `reasoning_effort`
+  - accepted values: `low`, `medium`, `high`
+  - forwarded into DeerFlow runtime config for models that support reasoning effort
+- `use_agent` + `agent_name`
+  - on `deerflow_chat` and `deerflow_stream`
+  - set `use_agent: true` and provide `agent_name` to route the run through a named DeerFlow agent
+  - passing `agent_name` alone also enables named-agent routing
+- `subagent_enabled`
+  - if `true`, the wrapper force-enables DeerFlow `ultra` semantics:
+    - `thinking_enabled = true`
+    - `plan_mode = true`
+    - `subagent_enabled = true`
+  - this keeps subagent usage aligned with the DeerFlow mode model
+
+Practical mapping:
+
+- simple direct run: `deerflow_chat(..., reasoning_effort="low")`
+- deeper direct run: `deerflow_chat(..., reasoning_effort="high")`
+- named custom agent: `deerflow_chat(..., use_agent=true, agent_name="researcher")`
+- explicit ultra/subagent run: `deerflow_chat_mode(..., mode="ultra", reasoning_effort="high")`
+
 ## Apply the patches
 
 These patches are meant to be applied on top of a recent Hermes `main` checkout.
@@ -225,5 +252,8 @@ git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profi
 
 - The DeerFlow wrapper is intentionally high-level; it exposes DeerFlow as a research/agent engine instead of mirroring every low-level DeerFlow internal tool.
 - The wrapper uses lazy client creation to avoid import-time failures during inspection.
+- The wrapper now exposes explicit `reasoning_effort` control for chat and stream operations.
+- The generic chat/stream tools can optionally route through a named DeerFlow agent instead of forcing you to switch tools first.
+- Any request that enables subagents is normalized to DeerFlow `ultra` mode semantics.
 - Thread listing/history is derived from DeerFlow's checkpointer so it still works when some `DeerFlowClient` thread helpers are missing.
 - The wrapper also includes custom-agent CRUD tools by writing DeerFlow agent configs directly when needed.

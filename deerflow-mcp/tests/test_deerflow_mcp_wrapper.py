@@ -66,7 +66,7 @@ class FakeClient:
 def test_deerflow_chat_forwards_args_and_returns_answer(monkeypatch):
     module = load_wrapper_module()
     fake = FakeClient()
-    monkeypatch.setattr(module, "_make_client", lambda agent_name=None: fake)
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
 
     result = module.deerflow_chat(
         message="hello",
@@ -85,7 +85,8 @@ def test_deerflow_chat_forwards_args_and_returns_answer(monkeypatch):
             {
                 "thread_id": "thread-123",
                 "model_name": "model-x",
-                "thinking_enabled": False,
+                "reasoning_effort": None,
+                "thinking_enabled": True,
                 "plan_mode": True,
                 "subagent_enabled": True,
             },
@@ -97,20 +98,108 @@ def test_deerflow_chat_forwards_args_and_returns_answer(monkeypatch):
 def test_deerflow_chat_generates_thread_id_when_missing(monkeypatch):
     module = load_wrapper_module()
     fake = FakeClient()
-    monkeypatch.setattr(module, "_make_client", lambda agent_name=None: fake)
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
     monkeypatch.setattr(module.uuid, "uuid4", lambda: "generated-id")
 
     result = module.deerflow_chat(message="hello")
 
     assert result == {"thread_id": "generated-id", "answer": "ok"}
     assert fake.calls[0][2]["thread_id"] == "generated-id"
+    assert fake.calls[0][2]["reasoning_effort"] is None
+
+
+
+def test_deerflow_chat_forwards_reasoning_effort(monkeypatch):
+    module = load_wrapper_module()
+    fake = FakeClient()
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
+
+    result = module.deerflow_chat(
+        message="analyze deeply",
+        thread_id="thread-effort",
+        reasoning_effort="high",
+    )
+
+    assert result == {"thread_id": "thread-effort", "answer": "ok"}
+    assert fake.calls == [
+        (
+            "chat",
+            "analyze deeply",
+            {
+                "thread_id": "thread-effort",
+                "model_name": None,
+                "reasoning_effort": "high",
+                "thinking_enabled": True,
+                "plan_mode": False,
+                "subagent_enabled": False,
+            },
+        )
+    ]
+
+
+
+def test_deerflow_chat_rejects_unknown_reasoning_effort():
+    module = load_wrapper_module()
+
+    with pytest.raises(ValueError):
+        module.deerflow_chat("hello", reasoning_effort="max")
+
+
+
+def test_deerflow_chat_requires_agent_name_when_use_agent_true():
+    module = load_wrapper_module()
+
+    with pytest.raises(ValueError):
+        module.deerflow_chat("hello", use_agent=True)
+
+
+
+def test_deerflow_chat_uses_named_agent_when_requested(monkeypatch):
+    module = load_wrapper_module()
+    fake = FakeClient()
+    seen = []
+
+    def fake_make_client(agent_name=None, skills=None):
+        seen.append(agent_name)
+        return fake
+
+    monkeypatch.setattr(module, "_make_client", fake_make_client)
+
+    result = module.deerflow_chat(
+        message="hello",
+        thread_id="agent-via-chat",
+        use_agent=True,
+        agent_name="researcher",
+        reasoning_effort="medium",
+    )
+
+    assert result == {
+        "thread_id": "agent-via-chat",
+        "agent_name": "researcher",
+        "answer": "ok",
+    }
+    assert seen == ["researcher"]
+    assert fake.calls == [
+        (
+            "chat",
+            "hello",
+            {
+                "thread_id": "agent-via-chat",
+                "model_name": None,
+                "reasoning_effort": "medium",
+                "thinking_enabled": True,
+                "plan_mode": False,
+                "subagent_enabled": False,
+            },
+        )
+    ]
 
 
 
 def test_list_skills_passes_enabled_only(monkeypatch):
     module = load_wrapper_module()
     fake = FakeClient()
-    monkeypatch.setattr(module, "_make_client", lambda agent_name=None: fake)
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
 
     result = module.deerflow_list_skills(enabled_only=False)
 
@@ -122,7 +211,7 @@ def test_list_skills_passes_enabled_only(monkeypatch):
 def test_upload_files_converts_strings_to_paths(monkeypatch):
     module = load_wrapper_module()
     fake = FakeClient()
-    monkeypatch.setattr(module, "_make_client", lambda agent_name=None: fake)
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
 
     result = module.deerflow_upload_files("thread-1", ["/tmp/a.txt", "/tmp/b.txt"])
 
@@ -136,7 +225,7 @@ def test_upload_files_converts_strings_to_paths(monkeypatch):
 def test_deerflow_get_skill_returns_found_and_missing(monkeypatch):
     module = load_wrapper_module()
     fake = FakeClient()
-    monkeypatch.setattr(module, "_make_client", lambda agent_name=None: fake)
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
 
     found = module.deerflow_get_skill("demo")
     missing = module.deerflow_get_skill("missing")
@@ -151,7 +240,7 @@ def test_deerflow_get_skill_returns_found_and_missing(monkeypatch):
 def test_deerflow_install_skill_converts_path(monkeypatch):
     module = load_wrapper_module()
     fake = FakeClient()
-    monkeypatch.setattr(module, "_make_client", lambda agent_name=None: fake)
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
 
     result = module.deerflow_install_skill("/tmp/demo.skill")
 
@@ -163,7 +252,7 @@ def test_deerflow_install_skill_converts_path(monkeypatch):
 def test_deerflow_chat_mode_maps_presets(monkeypatch):
     module = load_wrapper_module()
     fake = FakeClient()
-    monkeypatch.setattr(module, "_make_client", lambda agent_name=None: fake)
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
 
     result = module.deerflow_chat_mode("research this", mode="ultra", thread_id="t-1")
 
@@ -175,6 +264,7 @@ def test_deerflow_chat_mode_maps_presets(monkeypatch):
             {
                 "thread_id": "t-1",
                 "model_name": None,
+                "reasoning_effort": None,
                 "thinking_enabled": True,
                 "plan_mode": True,
                 "subagent_enabled": True,
@@ -197,7 +287,7 @@ def test_deerflow_chat_agent_uses_named_client(monkeypatch):
     fake = FakeClient()
     seen = []
 
-    def fake_make_client(agent_name=None):
+    def fake_make_client(agent_name=None, skills=None):
         seen.append(agent_name)
         return fake
 
@@ -214,9 +304,42 @@ def test_deerflow_chat_agent_uses_named_client(monkeypatch):
             {
                 "thread_id": "agent-thread",
                 "model_name": None,
+                "reasoning_effort": None,
                 "thinking_enabled": True,
                 "plan_mode": False,
                 "subagent_enabled": False,
+            },
+        )
+    ]
+
+
+
+def test_deerflow_chat_agent_enables_ultra_when_subagent_requested(monkeypatch):
+    module = load_wrapper_module()
+    fake = FakeClient()
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
+
+    result = module.deerflow_chat_agent(
+        "hello",
+        agent_name="researcher",
+        thread_id="ultra-thread",
+        thinking_enabled=False,
+        plan_mode=False,
+        subagent_enabled=True,
+    )
+
+    assert result == {"thread_id": "ultra-thread", "agent_name": "researcher", "answer": "ok"}
+    assert fake.calls == [
+        (
+            "chat",
+            "hello",
+            {
+                "thread_id": "ultra-thread",
+                "model_name": None,
+                "reasoning_effort": None,
+                "thinking_enabled": True,
+                "plan_mode": True,
+                "subagent_enabled": True,
             },
         )
     ]
@@ -231,7 +354,7 @@ def test_deerflow_stream_collects_events_and_reports_truncation(monkeypatch):
         FakeEvent("values", {"messages": []}),
         FakeEvent("end", {"usage": {}}),
     ]
-    monkeypatch.setattr(module, "_make_client", lambda agent_name=None: fake)
+    monkeypatch.setattr(module, "_make_client", lambda agent_name=None, skills=None: fake)
 
     result = module.deerflow_stream("hello", thread_id="stream-thread", max_events=2)
 
@@ -248,6 +371,50 @@ def test_deerflow_stream_collects_events_and_reports_truncation(monkeypatch):
             {
                 "thread_id": "stream-thread",
                 "model_name": None,
+                "reasoning_effort": None,
+                "thinking_enabled": True,
+                "plan_mode": False,
+                "subagent_enabled": False,
+            },
+        )
+    ]
+
+
+
+def test_deerflow_stream_supports_named_agent_and_reasoning_effort(monkeypatch):
+    module = load_wrapper_module()
+    fake = FakeClient()
+    fake.stream_events = [FakeEvent("end", {"usage": {}})]
+    seen = []
+
+    def fake_make_client(agent_name=None, skills=None):
+        seen.append(agent_name)
+        return fake
+
+    monkeypatch.setattr(module, "_make_client", fake_make_client)
+
+    result = module.deerflow_stream(
+        "stream this",
+        thread_id="stream-agent",
+        agent_name="researcher",
+        reasoning_effort="low",
+        max_events=5,
+    )
+
+    assert result == {
+        "thread_id": "stream-agent",
+        "events": [{"type": "end", "data": {"usage": {}}}],
+        "truncated": False,
+    }
+    assert seen == ["researcher"]
+    assert fake.calls == [
+        (
+            "stream",
+            "stream this",
+            {
+                "thread_id": "stream-agent",
+                "model_name": None,
+                "reasoning_effort": "low",
                 "thinking_enabled": True,
                 "plan_mode": False,
                 "subagent_enabled": False,
