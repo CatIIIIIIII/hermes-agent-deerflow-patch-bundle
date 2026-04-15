@@ -1,0 +1,165 @@
+config_version: 7
+log_level: info
+token_usage:
+  enabled: false
+models:
+  - name: gpt-5.4
+    display_name: GPT-5.4 (IkunCode)
+    use: deerflow.models.ikuncode_provider:IkunCodeChatModel
+    model: gpt-5.4
+    api_key: ${DEERFLOW_API_KEY}
+    base_url: https://api.ikuncode.cc/v1
+    request_timeout: 600.0
+    max_retries: 2
+    max_tokens: 8192
+    temperature: 0.7
+    streaming: true
+    supports_vision: true
+    supports_thinking: true
+    supports_reasoning_effort: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+    profile:
+      max_input_tokens: 1050000
+      max_output_tokens: 8192
+  - name: ikuncode-gpt-5-4
+    display_name: GPT-5.4 (IkunCode)
+    use: deerflow.models.ikuncode_provider:IkunCodeChatModel
+    model: gpt-5.4
+    api_key: ${DEERFLOW_API_KEY}
+    base_url: https://api.ikuncode.cc/v1
+    request_timeout: 600.0
+    max_retries: 2
+    max_tokens: 8192
+    temperature: 0.7
+    streaming: true
+    supports_vision: true
+    supports_thinking: true
+    supports_reasoning_effort: true
+    when_thinking_enabled:
+      extra_body:
+        thinking:
+          type: enabled
+    profile:
+      max_input_tokens: 1050000
+      max_output_tokens: 8192
+tools:
+  - name: web_search
+    group: web
+    use: deerflow.community.ddg_search.tools:web_search_tool
+    max_results: 5
+  - name: web_fetch
+    group: web
+    use: deerflow.community.jina_ai.tools:web_fetch_tool
+    timeout: 10
+  - name: image_search
+    group: web
+    use: deerflow.community.image_search.tools:image_search_tool
+    max_results: 5
+  - name: ls
+    group: file:read
+    use: deerflow.sandbox.tools:ls_tool
+  - name: read_file
+    group: file:read
+    use: deerflow.sandbox.tools:read_file_tool
+  - name: write_file
+    group: file:write
+    use: deerflow.sandbox.tools:write_file_tool
+  - name: str_replace
+    group: file:write
+    use: deerflow.sandbox.tools:str_replace_tool
+  - name: bash
+    group: bash
+    use: deerflow.sandbox.tools:bash_tool
+tool_search:
+  enabled: false
+sandbox:
+  use: deerflow.sandbox.local:LocalSandboxProvider
+  allow_host_bash: true
+  mounts:
+    - host_path: ${HOME}/your-project
+      container_path: /repos/your-project
+      read_only: true
+    - host_path: /data/your-dataset
+      container_path: /data/your-dataset
+      read_only: true
+  bash_output_max_chars: 20000
+  read_file_output_max_chars: 50000
+  ls_output_max_chars: 20000
+subagents:
+  timeout_seconds: 1800
+skills:
+  container_path: /mnt/skills
+title:
+  enabled: true
+  max_words: 6
+  max_chars: 60
+  model_name: null
+summarization:
+  enabled: true
+  model_name: null
+  trigger:
+    - type: tokens
+      value: 200000
+    - type: fraction
+      value: 0.8
+  keep:
+    type: messages
+    value: 10
+  trim_tokens_to_summarize: 200000
+  summary_prompt: null
+context_management:
+  snip:
+    enabled: true
+    strip_historical_upload_blocks: true
+  microcompact:
+    enabled: true
+    compactable_tools:
+      - bash
+      - read_file
+      - web_search
+      - web_fetch
+    keep_recent_tool_results: 2
+    min_content_chars: 1200
+  tool_result_budget:
+    enabled: true
+    externalize_min_chars: 12000
+    preview_head_chars: 2000
+    preview_tail_chars: 1000
+    storage_subdir: .context/tool-results
+  session_state:
+    enabled: true
+    collapse_enabled: true
+    collapse_when_message_count_at_least: 100
+    keep_recent_messages: 20
+    max_tool_observations: 4
+    max_tool_observation_chars: 240
+    inject_when_message_count_at_least: 50
+    max_goal_chars: 600
+    max_response_chars: 400
+memory:
+  enabled: true
+  storage_path: memory.json
+  debounce_seconds: 30
+  model_name: null
+  max_facts: 100
+  fact_confidence_threshold: 0.7
+  injection_enabled: true
+  max_injection_tokens: 2000
+checkpointer:
+  type: sqlite
+  connection_string: checkpoints.db
+tool_groups:
+  - name: web
+  - name: file:read
+  - name: file:write
+  - name: bash
+uploads:
+  pdf_converter: auto
+agents_api:
+  enabled: false
+skill_evolution:
+  enabled: false
+  moderation_model_name: null
