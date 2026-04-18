@@ -1,18 +1,8 @@
-From 5cf7fa2d89b1b1c622fc42047a63d2d3dcbf4d24 Mon Sep 17 00:00:00 2001
-From: CatIIIIIIII <catiiiiiiii@users.noreply.github.com>
-Date: Wed, 15 Apr 2026 18:00:03 +0800
-Subject: [PATCH] feat: make Hermes memory config more retentive
-
----
- hermes_cli/config.py                                      | 8 +++++---
- .../openclaw-migration/scripts/openclaw_to_hermes.py      | 4 ++--
- 2 files changed, 7 insertions(+), 5 deletions(-)
-
 diff --git a/hermes_cli/config.py b/hermes_cli/config.py
-index d06338aa..8f471763 100644
+index e17107b6..76049725 100644
 --- a/hermes_cli/config.py
 +++ b/hermes_cli/config.py
-@@ -488,7 +488,7 @@ DEFAULT_CONFIG = {
+@@ -537,7 +537,7 @@ DEFAULT_CONFIG = {
              "model": "",
              "base_url": "",
              "api_key": "",
@@ -21,7 +11,7 @@ index d06338aa..8f471763 100644
          },
      },
      
-@@ -586,8 +586,10 @@ DEFAULT_CONFIG = {
+@@ -646,8 +646,10 @@ DEFAULT_CONFIG = {
      "memory": {
          "memory_enabled": True,
          "user_profile_enabled": True,
@@ -49,5 +39,3 @@ index beb32aba..7bc35096 100644
  SKILL_CATEGORY_DIRNAME = "openclaw-imports"
  SKILL_CATEGORY_DESCRIPTION = (
      "Skills migrated from an OpenClaw workspace."
--- 
-2.34.1

@@ -5,7 +5,7 @@ This repo contains the Hermes-side changes and helper files I use locally for tw
 1. a custom-endpoint `User-Agent` fix for OpenAI-compatible gateways that reject the default OpenAI Python SDK header
 2. a DeerFlow MCP bridge bundle so Hermes can talk to DeerFlow reliably, plus an optional Hermes profile patch that keeps the DeerFlow MCP server available in newly created profiles
 
-Everything here is currently exported from a local Hermes Agent `main` checkout at commit `1acf81fd84f3677db95ff9d6bafe5fdf1d6bf838`.
+Everything here is currently exported from a local Hermes Agent `main` checkout at commit `64b35471`.
 
 The patch filenames still keep the original `v0.8.0` label so existing local scripts do not need to change.
 
@@ -82,6 +82,7 @@ Practical mapping:
 ## Apply the patches
 
 These patches are meant to be applied on top of a recent Hermes `main` checkout.
+They were last regenerated against local Hermes commit `64b35471`.
 
 Recommended flow:
 
@@ -119,8 +120,8 @@ git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profi
 ### 1. Clone this repo
 
 ```bash
-git clone https://github.com/CatIIIIIIII/hermes-custom-endpoint-ua-fix.git
-cd hermes-custom-endpoint-ua-fix
+git clone https://github.com/CatIIIIIIII/hermes-agent-deerflow-patch-bundle.git
+cd hermes-agent-deerflow-patch-bundle
 ```
 
 ### 2. Install the DeerFlow MCP wrapper into Hermes
@@ -257,6 +258,14 @@ Use the Hermes virtualenv if your shell does not already have `pytest` and the `
 git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profile-mcp.patch
 ```
 
+### Verify all three Hermes patches apply cleanly
+
+```bash
+git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-custom-ua.patch
+git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profile-mcp.patch
+git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-memory-retentive-config.patch
+```
+
 ## Practical notes
 
 - The DeerFlow wrapper is intentionally high-level; it exposes DeerFlow as a research/agent engine instead of mirroring every low-level DeerFlow internal tool.
@@ -266,3 +275,5 @@ git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profi
 - Any request that enables subagents is normalized to DeerFlow `ultra` mode semantics.
 - Thread listing/history is derived from DeerFlow's checkpointer so it still works when some `DeerFlowClient` thread helpers are missing.
 - The wrapper also includes custom-agent CRUD tools by writing DeerFlow agent configs directly when needed.
+- On Hermes, the custom-endpoint patch now reflects the actual current code path, including the generic `HermesAgent/1.0` header for unnamed OpenAI-compatible gateways and regression tests for both direct and named custom providers.
+- On Hermes, the current Responses path already strips `reasoning.id` when `store: false`; that fix is upstream in the updated Hermes checkout and is not shipped as a separate patch in this bundle.

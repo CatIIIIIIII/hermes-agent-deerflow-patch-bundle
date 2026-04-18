@@ -1,8 +1,8 @@
 diff --git a/agent/auxiliary_client.py b/agent/auxiliary_client.py
-index 49dea65f..613c2baa 100644
+index 4860b16a..47f86c02 100644
 --- a/agent/auxiliary_client.py
 +++ b/agent/auxiliary_client.py
-@@ -121,6 +121,18 @@ _OR_HEADERS = {
+@@ -137,6 +137,19 @@ _OR_HEADERS = {
      "X-OpenRouter-Categories": "productivity,cli-agent",
  }
  
@@ -18,10 +18,11 @@ index 49dea65f..613c2baa 100644
 +        return copilot_default_headers()
 +    return {"User-Agent": "HermesAgent/1.0"}
 +
++
  # Nous Portal extra_body for product attribution.
  # Callers should pass this as extra_body in chat.completions.create()
  # when the auxiliary client is backed by Nous Portal.
-@@ -910,11 +922,13 @@ def _try_custom_endpoint() -> Tuple[Optional[OpenAI], Optional[str]]:
+@@ -991,11 +1004,13 @@ def _try_custom_endpoint() -> Tuple[Optional[OpenAI], Optional[str]]:
      if custom_base.lower().startswith(_CODEX_AUX_BASE_URL.lower()):
          return None, None
      model = _read_main_model() or "gpt-4o-mini"
@@ -37,7 +38,7 @@ index 49dea65f..613c2baa 100644
  
  
  def _try_codex() -> Tuple[Optional[Any], Optional[str]]:
-@@ -1243,6 +1257,10 @@ def _to_async_client(sync_client, model: str):
+@@ -1324,6 +1339,10 @@ def _to_async_client(sync_client, model: str):
          async_kwargs["default_headers"] = copilot_default_headers()
      elif "api.kimi.com" in base_lower:
          async_kwargs["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
@@ -48,22 +49,22 @@ index 49dea65f..613c2baa 100644
      return AsyncOpenAI(**async_kwargs), model
  
  
-@@ -1418,11 +1436,9 @@ def resolve_provider_client(
+@@ -1499,12 +1518,8 @@ def resolve_provider_client(
+                 model or _read_main_model() or "gpt-4o-mini",
                  provider,
              )
-             extra = {}
+-            extra = {}
 -            if "api.kimi.com" in custom_base.lower():
 -                extra["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
 -            elif "api.githubcopilot.com" in custom_base.lower():
 -                from hermes_cli.models import copilot_default_headers
 -                extra["default_headers"] = copilot_default_headers()
 +            headers = _custom_endpoint_headers(custom_base)
-+            if headers:
-+                extra["default_headers"] = headers
++            extra = {"default_headers": headers} if headers else {}
              client = OpenAI(api_key=custom_key, base_url=custom_base, **extra)
              client = _wrap_if_needed(client, final_model, custom_base)
              return (_to_async_client(client, final_model) if async_mode
-@@ -1457,7 +1473,12 @@ def resolve_provider_client(
+@@ -1539,7 +1554,12 @@ def resolve_provider_client(
                      model or custom_entry.get("model") or _read_main_model() or "gpt-4o-mini",
                      provider,
                  )
@@ -78,10 +79,10 @@ index 49dea65f..613c2baa 100644
                  logger.debug(
                      "resolve_provider_client: named custom provider %r (%s)",
 diff --git a/run_agent.py b/run_agent.py
-index 626951b2..b6501cd5 100644
+index bb8cfa45..d82b0c1e 100644
 --- a/run_agent.py
 +++ b/run_agent.py
-@@ -918,6 +918,10 @@ class AIAgent:
+@@ -1034,6 +1034,10 @@ class AIAgent:
                      }
                  elif "portal.qwen.ai" in effective_base.lower():
                      client_kwargs["default_headers"] = _qwen_portal_headers()
@@ -92,7 +93,7 @@ index 626951b2..b6501cd5 100644
              else:
                  # No explicit creds — use the centralized provider router
                  from agent.auxiliary_client import resolve_provider_client
-@@ -4630,7 +4634,7 @@ class AIAgent:
+@@ -5043,7 +5047,7 @@ class AIAgent:
          return True
  
      def _apply_client_headers_for_base_url(self, base_url: str) -> None:
@@ -101,7 +102,7 @@ index 626951b2..b6501cd5 100644
  
          normalized = (base_url or "").lower()
          if "openrouter" in normalized:
-@@ -4643,6 +4647,8 @@ class AIAgent:
+@@ -5056,6 +5060,8 @@ class AIAgent:
              self._client_kwargs["default_headers"] = {"User-Agent": "KimiCLI/1.30.0"}
          elif "portal.qwen.ai" in normalized:
              self._client_kwargs["default_headers"] = _qwen_portal_headers()
@@ -111,12 +112,12 @@ index 626951b2..b6501cd5 100644
              self._client_kwargs.pop("default_headers", None)
  
 diff --git a/tests/agent/test_auxiliary_client.py b/tests/agent/test_auxiliary_client.py
-index e6a9d191..6ef3a8ac 100644
+index 1778855d..1875e092 100644
 --- a/tests/agent/test_auxiliary_client.py
 +++ b/tests/agent/test_auxiliary_client.py
-@@ -584,6 +584,27 @@ class TestGetTextAuxiliaryClient:
-         call_kwargs = mock_openai.call_args
-         assert call_kwargs.kwargs["base_url"] == "http://localhost:1234/v1"
+@@ -450,6 +450,27 @@ class TestExplicitProviderRouting:
+ class TestGetTextAuxiliaryClient:
+     """Test the full resolution chain for get_text_auxiliary_client."""
  
 +    def test_custom_endpoint_uses_hermes_user_agent_for_generic_gateway(self, monkeypatch):
 +        config = {
@@ -139,11 +140,11 @@ index e6a9d191..6ef3a8ac 100644
 +        call_kwargs = mock_openai.call_args
 +        assert call_kwargs.kwargs["default_headers"] == {"User-Agent": "HermesAgent/1.0"}
 +
-     def test_codex_fallback_when_nothing_else(self, codex_auth_dir):
-         with patch("agent.auxiliary_client._read_nous_auth", return_value=None), \
-              patch("agent.auxiliary_client.OpenAI") as mock_openai:
+     def test_codex_pool_entry_takes_priority_over_auth_store(self):
+         class _Entry:
+             access_token = "pooled-codex-token"
 diff --git a/tests/agent/test_auxiliary_named_custom_providers.py b/tests/agent/test_auxiliary_named_custom_providers.py
-index 224910ac..1496ef84 100644
+index 437a6c40..d9419fc0 100644
 --- a/tests/agent/test_auxiliary_named_custom_providers.py
 +++ b/tests/agent/test_auxiliary_named_custom_providers.py
 @@ -130,6 +130,23 @@ class TestResolveProviderClientNamedCustom:
@@ -171,10 +172,10 @@ index 224910ac..1496ef84 100644
          _write_config(tmp_path, {
              "model": {"default": "test"},
 diff --git a/tests/run_agent/test_run_agent.py b/tests/run_agent/test_run_agent.py
-index d71e6a62..36cc7b8d 100644
+index 86f95580..f724ee03 100644
 --- a/tests/run_agent/test_run_agent.py
 +++ b/tests/run_agent/test_run_agent.py
-@@ -2783,6 +2783,16 @@ class TestMaxTokensParam:
+@@ -2942,6 +2942,16 @@ class TestMaxTokensParam:
          assert result == {"max_tokens": 4096}
  
  
