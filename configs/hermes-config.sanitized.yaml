@@ -71,11 +71,12 @@ auxiliary:
     api_key: ""
     timeout: 360
   compression:
-    provider: auto
-    model: ""
+    provider: main
+    model: gpt-5.4
     base_url: ""
     api_key: ""
     timeout: 120
+    context_length: 1000000
   session_search:
     provider: auto
     model: ""
