@@ -1,5 +1,5 @@
 model:
-  default: gpt-5.4
+  default: gpt-5.5
   provider: custom
   base_url: https://api.ikuncode.cc/v1
   api_key: ${HERMES_API_KEY}
@@ -72,7 +72,7 @@ auxiliary:
     timeout: 360
   compression:
     provider: main
-    model: gpt-5.4
+    model: gpt-5.5
     base_url: ""
     api_key: ""
     timeout: 120
@@ -233,7 +233,7 @@ custom_providers:
   - name: Api.ikuncode.cc
     base_url: https://api.ikuncode.cc/v1
     api_key: ${HERMES_API_KEY}
-    model: gpt-5.4
+    model: gpt-5.5
     models:
-      gpt-5.4:
+      gpt-5.5:
         context_length: 1000000

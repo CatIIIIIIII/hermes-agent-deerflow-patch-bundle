@@ -3,10 +3,10 @@ log_level: info
 token_usage:
   enabled: false
 models:
-  - name: gpt-5.4
-    display_name: GPT-5.4 (IkunCode)
+  - name: gpt-5.5
+    display_name: GPT-5.5 (IkunCode)
     use: deerflow.models.ikuncode_provider:IkunCodeChatModel
-    model: gpt-5.4
+    model: gpt-5.5
     api_key: ${DEERFLOW_API_KEY}
     base_url: https://api.ikuncode.cc/v1
     request_timeout: 600.0
@@ -24,10 +24,10 @@ models:
     profile:
       max_input_tokens: 1050000
       max_output_tokens: 8192
-  - name: ikuncode-gpt-5-4
-    display_name: GPT-5.4 (IkunCode)
+  - name: ikuncode-gpt-5-5
+    display_name: GPT-5.5 (IkunCode)
     use: deerflow.models.ikuncode_provider:IkunCodeChatModel
-    model: gpt-5.4
+    model: gpt-5.5
     api_key: ${DEERFLOW_API_KEY}
     base_url: https://api.ikuncode.cc/v1
     request_timeout: 600.0
