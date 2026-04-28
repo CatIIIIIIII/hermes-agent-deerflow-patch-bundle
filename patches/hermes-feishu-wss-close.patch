@@ -1,0 +1,112 @@
+diff --git a/gateway/platforms/feishu.py b/gateway/platforms/feishu.py
+index 718f01e99..c1a08ebd3 100644
+--- a/gateway/platforms/feishu.py
++++ b/gateway/platforms/feishu.py
+@@ -1556,10 +1556,40 @@ class FeishuAdapter(BasePlatformAdapter):
+         await self._cancel_pending_tasks(self._pending_text_batch_tasks)
+         await self._cancel_pending_tasks(self._pending_media_batch_tasks)
+         self._reset_batch_buffers()
++
++        # Send a WebSocket CLOSE frame before tearing down the thread loop.
++        # Otherwise Feishu can keep routing messages to the stale endpoint
++        # after gateway restart/--replace/dashboard, making the channel silent.
++        # See NousResearch/hermes-agent#10202.
++        ws_client = self._ws_client
++        ws_thread_loop = self._ws_thread_loop
+         self._disable_websocket_auto_reconnect()
+         await self._stop_webhook_server()
+ 
+-        ws_thread_loop = self._ws_thread_loop
++        if (
++            ws_client is not None
++            and ws_thread_loop is not None
++            and not ws_thread_loop.is_closed()
++            and hasattr(ws_client, "_disconnect")
++        ):
++            try:
++                future = asyncio.run_coroutine_threadsafe(
++                    ws_client._disconnect(), ws_thread_loop
++                )
++                await asyncio.wait_for(asyncio.wrap_future(future), timeout=5.0)
++                logger.debug("[Feishu] Sent WebSocket CLOSE frame to Feishu")
++            except asyncio.TimeoutError:
++                logger.warning(
++                    "[Feishu] CLOSE frame not acknowledged within 5s; "
++                    "Feishu may briefly route messages to the stale connection"
++                )
++            except Exception as exc:
++                logger.debug(
++                    "[Feishu] Could not send WebSocket CLOSE frame: %s",
++                    exc,
++                    exc_info=True,
++                )
++
+         if ws_thread_loop is not None and not ws_thread_loop.is_closed():
+             logger.debug("[Feishu] Cancelling websocket thread tasks and stopping loop")
+ 
+diff --git a/tests/gateway/test_feishu.py b/tests/gateway/test_feishu.py
+index f21b7dcef..e2d9b509c 100644
+--- a/tests/gateway/test_feishu.py
++++ b/tests/gateway/test_feishu.py
+@@ -249,6 +249,61 @@ class TestFeishuAdapterMessaging(unittest.TestCase):
+         )
+         release_lock.assert_called_once_with("feishu-app-id", "cli_app")
+ 
++    def test_disconnect_sends_websocket_close_frame(self):
++        """Regression test for #10202."""
++        import threading
++        from gateway.config import PlatformConfig
++        from gateway.platforms.feishu import FeishuAdapter
++
++        adapter = FeishuAdapter(PlatformConfig())
++        ws_thread_loop = asyncio.new_event_loop()
++        ready = threading.Event()
++
++        def _run_loop() -> None:
++            asyncio.set_event_loop(ws_thread_loop)
++            ready.set()
++            ws_thread_loop.run_forever()
++
++        thread = threading.Thread(target=_run_loop, daemon=True)
++        thread.start()
++        ready.wait()
++
++        close_called = threading.Event()
++
++        async def _fake_disconnect() -> None:
++            close_called.set()
++
++        adapter._ws_client = SimpleNamespace(
++            _disconnect=_fake_disconnect,
++            _auto_reconnect=True,
++        )
++        adapter._ws_thread_loop = ws_thread_loop
++        adapter._ws_future = None
++
++        try:
++            asyncio.run(adapter.disconnect())
++        finally:
++            if not ws_thread_loop.is_closed():
++                ws_thread_loop.call_soon_threadsafe(ws_thread_loop.stop)
++            thread.join(timeout=2.0)
++            if not ws_thread_loop.is_closed():
++                ws_thread_loop.close()
++
++        self.assertTrue(close_called.is_set())
++        self.assertIsNone(adapter._ws_client)
++
++    def test_disconnect_tolerates_missing_internal_disconnect(self):
++        from gateway.config import PlatformConfig
++        from gateway.platforms.feishu import FeishuAdapter
++
++        adapter = FeishuAdapter(PlatformConfig())
++        adapter._ws_client = SimpleNamespace(_auto_reconnect=True)
++        adapter._ws_thread_loop = None
++        adapter._ws_future = None
++
++        asyncio.run(adapter.disconnect())
++        self.assertIsNone(adapter._ws_client)
++
+     @patch.dict(os.environ, {
+         "FEISHU_APP_ID": "cli_app",
+         "FEISHU_APP_SECRET": "secret_app",

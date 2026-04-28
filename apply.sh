@@ -15,12 +15,14 @@ Examples:
   ./apply.sh ~/.hermes/hermes-agent ua
   ./apply.sh ~/.hermes/hermes-agent deerflow-profile
   ./apply.sh ~/.hermes/hermes-agent memory-retentive
+  ./apply.sh ~/.hermes/hermes-agent feishu-wss-close
   ./apply.sh ~/.hermes/hermes-agent all
 
 Available patches:
   ua                Hermes custom endpoint User-Agent fix
   deerflow-profile  Merge default-profile mcp_servers into new Hermes profiles
   memory-retentive  Raise Hermes memory defaults and make memory review more aggressive
+  feishu-wss-close  Send Feishu WebSocket CLOSE during gateway shutdown/restart
   all               Apply all patches in order
 EOF
 }
@@ -35,6 +37,9 @@ patch_path_for() {
       ;;
     memory-retentive)
       printf '%s\n' "$SCRIPT_DIR/patches/hermes-v0.8.0-memory-retentive-config.patch"
+      ;;
+    feishu-wss-close)
+      printf '%s\n' "$SCRIPT_DIR/patches/hermes-feishu-wss-close.patch"
       ;;
     *)
       return 1
@@ -67,22 +72,23 @@ if [[ ! -d "$TARGET" ]]; then
   exit 1
 fi
 
-if [[ ! -d "$TARGET/.git" ]]; then
+if ! git -C "$TARGET" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "Target does not look like a git checkout: $TARGET" >&2
   exit 1
 fi
 
 case "$PATCH_NAME" in
-  ua|deerflow-profile|memory-retentive)
+  ua|deerflow-profile|memory-retentive|feishu-wss-close)
     apply_one "$PATCH_NAME"
     ;;
   all)
     apply_one ua
     apply_one deerflow-profile
     apply_one memory-retentive
+    apply_one feishu-wss-close
     ;;
   list)
-    printf '%s\n' 'ua' 'deerflow-profile' 'memory-retentive' 'all'
+    printf '%s\n' 'ua' 'deerflow-profile' 'memory-retentive' 'feishu-wss-close' 'all'
     ;;
   *)
     echo "Unknown patch: $PATCH_NAME" >&2

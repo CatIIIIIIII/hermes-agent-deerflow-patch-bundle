@@ -5,9 +5,9 @@ This repo contains the Hermes-side changes and helper files I use locally for tw
 1. a custom-endpoint `User-Agent` fix for OpenAI-compatible gateways that reject the default OpenAI Python SDK header
 2. a DeerFlow MCP bridge bundle so Hermes can talk to DeerFlow reliably, plus an optional Hermes profile patch that keeps the DeerFlow MCP server available in newly created profiles
 
-Everything here is currently exported from a local Hermes Agent `main` checkout at commit `94b26f3e`.
+Everything here is currently exported from local Hermes Agent `main` checkouts at commits `94b26f3e` and `12d745bd`.
 
-The patch filenames still keep the original `v0.8.0` label so existing local scripts do not need to change.
+The older patch filenames still keep the original `v0.8.0` label so existing local scripts do not need to change.
 
 ## Repository layout
 
@@ -17,6 +17,8 @@ The patch filenames still keep the original `v0.8.0` label so existing local scr
   - patches Hermes profile creation so `mcp_servers` from the default profile are merged into new profiles
 - `patches/hermes-v0.8.0-memory-retentive-config.patch`
   - raises Hermes built-in memory defaults and makes memory review / flush behavior more aggressive
+- `patches/hermes-feishu-wss-close.patch`
+  - sends a Feishu WebSocket CLOSE frame during gateway shutdown/restart to avoid stale WSS routing
 - `deerflow-mcp/deerflow_mcp.py`
   - FastMCP wrapper around `deerflow.client.DeerFlowClient`
 - `deerflow-mcp/run_deerflow_mcp.sh`
@@ -82,7 +84,7 @@ Practical mapping:
 ## Apply the patches
 
 These patches are meant to be applied on top of a recent Hermes `main` checkout.
-They were last regenerated against local Hermes commit `94b26f3e`.
+The existing UA, DeerFlow profile, and memory patches were last regenerated against local Hermes commit `94b26f3e`; the Feishu WSS close patch was exported from local Hermes commit `12d745bd`.
 
 Recommended flow:
 
@@ -106,6 +108,7 @@ Or apply each patch separately:
 ./apply.sh ~/.hermes/hermes-agent ua
 ./apply.sh ~/.hermes/hermes-agent deerflow-profile
 ./apply.sh ~/.hermes/hermes-agent memory-retentive
+./apply.sh ~/.hermes/hermes-agent feishu-wss-close
 ```
 
 If you only want to verify applicability first:
@@ -113,6 +116,7 @@ If you only want to verify applicability first:
 ```bash
 git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-custom-ua.patch
 git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profile-mcp.patch
+git -C ~/.hermes/hermes-agent apply --check patches/hermes-feishu-wss-close.patch
 ```
 
 ## Quick start on another machine
@@ -151,6 +155,12 @@ Or if you only want the memory-defaults patch:
 
 ```bash
 ./apply.sh ~/.hermes/hermes-agent memory-retentive
+```
+
+Or if you only want the Feishu gateway shutdown fix:
+
+```bash
+./apply.sh ~/.hermes/hermes-agent feishu-wss-close
 ```
 
 ### 4. Add the DeerFlow MCP server to your Hermes config
@@ -223,6 +233,17 @@ Files touched by that Hermes patch:
 - `run_agent.py`
 - `agent/auxiliary_client.py`
 
+## What the Feishu WSS close patch changes
+
+The `feishu-wss-close` patch updates Hermes' Feishu adapter shutdown path so it sends the official Lark/Feishu SDK WebSocket CLOSE frame before cancelling the WSS thread loop.
+
+This addresses the failure mode tracked upstream as NousResearch/hermes-agent#10202, where `gateway restart`, `gateway run --replace`, `hermes dashboard`, or similar restarts could leave Feishu routing messages to a stale WSS endpoint. The user-facing symptom is that the Feishu bot appears connected but suddenly stops responding until the stale server-side connection expires or the gateway is restarted again.
+
+Files touched by that Hermes patch:
+
+- `gateway/platforms/feishu.py`
+- `tests/gateway/test_feishu.py`
+
 ## Manual patch application
 
 ### DeerFlow profile patch
@@ -235,6 +256,12 @@ git -C ~/.hermes/hermes-agent apply patches/hermes-v0.8.0-deerflow-profile-mcp.p
 
 ```bash
 git -C ~/.hermes/hermes-agent apply patches/hermes-v0.8.0-custom-ua.patch
+```
+
+### Feishu WSS close patch
+
+```bash
+git -C ~/.hermes/hermes-agent apply patches/hermes-feishu-wss-close.patch
 ```
 
 ## Test / sanity-check commands
@@ -260,12 +287,13 @@ Use the Hermes virtualenv if your shell does not already have `pytest` and the `
 git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profile-mcp.patch
 ```
 
-### Verify all three Hermes patches apply cleanly
+### Verify all Hermes patches apply cleanly
 
 ```bash
 git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-custom-ua.patch
 git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-deerflow-profile-mcp.patch
 git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-memory-retentive-config.patch
+git -C ~/.hermes/hermes-agent apply --check patches/hermes-feishu-wss-close.patch
 ```
 
 ## Practical notes
@@ -278,4 +306,5 @@ git -C ~/.hermes/hermes-agent apply --check patches/hermes-v0.8.0-memory-retenti
 - Thread listing/history is derived from DeerFlow's checkpointer so it still works when some `DeerFlowClient` thread helpers are missing.
 - The wrapper also includes custom-agent CRUD tools by writing DeerFlow agent configs directly when needed.
 - On Hermes, the custom-endpoint patch now reflects the actual current code path, including the generic `HermesAgent/1.0` header for unnamed OpenAI-compatible gateways and regression tests for both direct and named custom providers.
+- On Hermes, the Feishu WSS close patch is a local carry of the upstream fix proposed in NousResearch/hermes-agent#16354 for issue #10202.
 - On Hermes, the current Responses path already strips `reasoning.id` when `store: false`; that fix is upstream in the updated Hermes checkout and is not shipped as a separate patch in this bundle.
