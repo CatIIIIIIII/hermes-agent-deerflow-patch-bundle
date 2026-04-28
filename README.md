@@ -5,7 +5,7 @@ This repo contains the Hermes-side changes and helper files I use locally for tw
 1. a custom-endpoint `User-Agent` fix for OpenAI-compatible gateways that reject the default OpenAI Python SDK header
 2. a DeerFlow MCP bridge bundle so Hermes can talk to DeerFlow reliably, plus an optional Hermes profile patch that keeps the DeerFlow MCP server available in newly created profiles
 
-Everything here is currently exported from a local Hermes Agent `main` checkout at commit `64b35471`.
+Everything here is currently exported from a local Hermes Agent `main` checkout at commit `94b26f3e`.
 
 The patch filenames still keep the original `v0.8.0` label so existing local scripts do not need to change.
 
@@ -82,7 +82,7 @@ Practical mapping:
 ## Apply the patches
 
 These patches are meant to be applied on top of a recent Hermes `main` checkout.
-They were last regenerated against local Hermes commit `64b35471`.
+They were last regenerated against local Hermes commit `94b26f3e`.
 
 Recommended flow:
 
@@ -212,8 +212,10 @@ User-Agent: HermesAgent/1.0
 It keeps the existing provider-specific special cases for:
 
 - OpenRouter
+- Vercel AI Gateway
 - GitHub Copilot
 - Kimi
+- ChatGPT/Codex Cloudflare
 - Qwen Portal
 
 Files touched by that Hermes patch:

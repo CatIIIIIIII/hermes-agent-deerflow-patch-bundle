@@ -1,17 +1,23 @@
 diff --git a/hermes_cli/config.py b/hermes_cli/config.py
-index e17107b6..76049725 100644
+index bb11a5df..ca07ba38 100644
 --- a/hermes_cli/config.py
 +++ b/hermes_cli/config.py
-@@ -537,7 +537,7 @@ DEFAULT_CONFIG = {
-             "model": "",
-             "base_url": "",
-             "api_key": "",
--            "timeout": 30,
-+            "timeout": 45,
+@@ -640,6 +640,14 @@ DEFAULT_CONFIG = {
+             "timeout": 30,
+             "extra_body": {},
          },
-     },
-     
-@@ -646,8 +646,10 @@ DEFAULT_CONFIG = {
++        "flush_memories": {
++            "provider": "auto",
++            "model": "",
++            "base_url": "",
++            "api_key": "",
++            "timeout": 45,
++            "extra_body": {},
++        },
+         "title_generation": {
+             "provider": "auto",
+             "model": "",
+@@ -765,8 +773,10 @@ DEFAULT_CONFIG = {
      "memory": {
          "memory_enabled": True,
          "user_profile_enabled": True,
@@ -25,7 +31,7 @@ index e17107b6..76049725 100644
          # Set to a provider name to activate: "openviking", "mem0",
          # "hindsight", "holographic", "retaindb", "byterover".
 diff --git a/optional-skills/migration/openclaw-migration/scripts/openclaw_to_hermes.py b/optional-skills/migration/openclaw-migration/scripts/openclaw_to_hermes.py
-index beb32aba..7bc35096 100644
+index adfbd9f5..0dcd6f7c 100644
 --- a/optional-skills/migration/openclaw-migration/scripts/openclaw_to_hermes.py
 +++ b/optional-skills/migration/openclaw-migration/scripts/openclaw_to_hermes.py
 @@ -26,8 +26,8 @@ except Exception:  # pragma: no cover - handled at runtime
